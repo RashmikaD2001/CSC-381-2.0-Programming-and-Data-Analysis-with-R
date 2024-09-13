@@ -1,4 +1,4 @@
-CSC 381 Programming and Data Analysis with R - Assignment 
+## CSC 381 Programming and Data Analysis with R - Assignment ##
 
 Repository Overview
 
