@@ -1,0 +1,404 @@
+---
+title: "CSC 381 2.0 Programming and Data Analysis with R"
+author: "AS2021563 - O.R.D.K. Perera"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<!-- Data cleaning and manipulation -->
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+library(coronavirus)
+library(tidyverse)
+library(skimr)
+library(magrittr)
+library(gridExtra)
+library(plotly)
+
+# filter the Lithuania data from the dataset
+lt_corona_data <- coronavirus %>% 
+  filter(country == "Lithuania") %>%
+  select(date,type,cases) %>% 
+  pivot_wider(names_from = type, values_from = cases) %>% 
+  mutate(date = as.Date(date, format = "%Y-%m-%d"),  year = year(date))
+
+# record minus values as zeros
+lt_corona_data <- lt_corona_data %>%  
+  mutate(death = ifelse(death<0,0,death),
+         recovery = ifelse(recovery<0,0,recovery),
+         confirmed =ifelse(confirmed<0,0,confirmed))
+
+
+# calculate active cases, total active, total recovery,total death for each day
+lt_corona_data <- lt_corona_data %>% 
+  mutate(active = ifelse(confirmed - death - recovery < 0, 0, confirmed - death - recovery)) %>% 
+  mutate(active_total =cumsum(active),
+         recovered_total = cumsum(recovery),
+         death_total = cumsum(death))
+
+lt_corona_data[391,4] <- (lt_corona_data[390,4] + lt_corona_data[392,4])/2
+
+# same operations from neighboring countries
+neighboring_countries <- coronavirus %>%
+  filter(country %in% c("Latvia", "Belarus", "Poland", "Lithuania", "Estonia")) %>%
+  select(date,country,type,cases,lat,long) %>% pivot_wider(names_from = type,
+                                                           values_from = cases)
+neighboring_countries <- neighboring_countries %>%
+  mutate(death = ifelse(death<0,0,death),
+         recovery = ifelse(recovery<0,0,recovery),
+         confirmed =ifelse(confirmed<0,0,confirmed))
+
+neighboring_countries <- neighboring_countries %>% 
+  mutate(active = ifelse(confirmed - death - recovery < 0, 0, confirmed - death - recovery)) %>% 
+  mutate(active_total =cumsum(active),
+         recovered_total = cumsum(recovery),
+         death_total = cumsum(death))
+
+
+boltic_countries <- neighboring_countries %>%
+  filter(country %in% c("Lithuania", "Latvia", "Estonia"))
+```
+
+# 1. Background
+<center>
+```{r echo=FALSE}
+library(leaflet)
+lithuania_lat <- 55.1694
+lithuania_long <- 23.8813
+
+leaflet() %>% addTiles() %>% setView(lng = lithuania_long, lat = lithuania_lat, zoom = 7) %>%
+  addMarkers(lng = lithuania_long, lat = lithuania_lat, popup = "Lithuania")
+```
+</center>
+<p style="text-align: center;">Location of Lithuania</p>
+
+
+### 1.1 Introduction
+
+
+|           **Republic of Lithuania** is a country in the Baltic region of Northern part of Europe. It is one of three Baltic states. Lithuania is bordered with Latvia from north, Belarus to the east, Poland to the south and Baltic Sea to west. The land has a total area of 65,286 km^2^. Lithuania is the 124th biggest country in terms of area in the world. Its capital and largest city is Vilnius.Official language is Lithuanian but Russian and Polish languages are also speak in the country. Lithuania was a part of Soviet Union but in 1990 Lithuania became first Soviet republic to break away from Soviet Union. Lithuania is a developed country with a high income and advanced economy. Gross domestic product (GDP) per capita of Lithuania is around 25000 USD. Lithuania is ranking 37th in the Human Development Index (HDI) and 19th in the World Happiness Report. Lithuania is a member of European Union (EU) and North Atlantic Treaty Organization (NATO). Climate of Lithuania is semi-continental, with very cold winters and mild, moderately rainy summers.The sun in Lithuania is rarely seen from November to February, while from May to August, it shines for a decent amount of time. Lithuania has a population of population of 2.86 million. Life expectancy of a Lithuanian citizen is 75.78 years.
+
+
+##### Population of Lithuania by age group
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+ages <- c("0–14 years", "15–64 years", "65 and over")
+value <- c(15.26, 64.29, 20.45)
+
+lt_population <- data.frame(
+  ageGroup = ages,
+  population = value
+  )
+
+ggplot(lt_population, aes(x = ageGroup, y = population)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(x = "Age Group", y = "Population Percentage")
+```
+
+<p style="text-align: center;">Data from Wikipedia</p>
+
+### 1.2 Corona virus pandemic in Lithuania
+
+
+On 30th January, the outbreak of the virus was declared a Public Health Emergency of International Concern [PHIEC] by the World Health Organization (WHO), on 11th March 2020 it was recognised as a pandemic. The virus was confirmed to have reached Lithuania in February 2020. On 18 March 2020. The Lithuanian government initially declared a quarantine from 16 March to 30 March but it was extended several times.The vaccination program began on 27 December 2020. Lithuania vaccinated one-third of its population on 22 May 2021. As of 1 July 2022, 72.59% of Lithuania's population has received at least one dose, while 69.77% have received at least two, while 34.74% of the population has received a booster dose.As of 21 January 2023, 4,529,015 COVID-19 vaccine doses have been administered in Lithuania.
+
+
+
+# 2.Exploratory Data Analysis
+
+### 2.1 Structure of Dataset
+
+Dataset consist data under these variables
+
+* date - The date of the observation in YYYY-MM-DD format
+* country - Name of country/region
+* province - Name of province/state, for countries where data is provided (Not Available for Lithuania)
+* population - Country or province population -  Country or province population
+* type - An indicator for the type of cases (confirmed, death, recovered)
+* cases - Number of cases on given date
+* lat - The latitude code
+* long - The longitude code
+* continent_name - Continent name
+* continent_code - Continent code
+* uid - Country code
+* province_state - Province or state if applicable
+* iso2 - Officially assigned country code identifiers with two-letter
+* iso3 - Officially assigned country code identifiers with three-letter
+* code3 - UN country code
+* fips - Federal Information Processing Standards code that uniquely identifies  
+  counties within the USA
+* combined_key - Country and province (if applicable)
+
+**Data is available for time period between 2020 January 22 to 2023 March 09.**
+
+```{r, echo=FALSE}
+skim(lt_corona_data)
+```
+
+### 2.2 Analysis
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+confirmedTotal <- sum(lt_corona_data$confirmed)
+deathTotal <- sum(lt_corona_data$death)
+recoveryTotal <- sum(lt_corona_data$recovery)
+activeTotal <- sum(lt_corona_data$active)
+population <- 2722291
+rows <- 1143
+```
+According to the dataset between the time period (from 2020 January 22 to 2023 March 09),
+
+        Total number of confirmed cases   = `r format(confirmedTotal,scientific = FALSE, big.mark = ",")`
+        
+        Total number of deaths recorded   = `r format(deathTotal,scientific = FALSE, big.mark = ",")`
+        
+        Total number of recoveries        = `r format(recoveryTotal,scientific = FALSE, big.mark = ",")`
+        
+        Mean number of confirmed cases per a day = `r format(confirmedTotal/rows,scientific = FALSE, big.mark = ",")`
+        
+        Mean number of deaths per a day = `r format(deathTotal/rows,scientific = FALSE, big.mark = ",")`
+        
+        Mean number of recoveries per a day = `r format(recoveryTotal/rows,scientific = FALSE, big.mark = ",")`
+        
+        Mean number of active cases per a day = `r format(activeTotal/rows,scientific = FALSE, big.mark = ",")`
+        
+        Percentage of total number of confirmed cases respective to the population = `r (confirmedTotal)/population * 100`%
+        
+        Percentage of total number of deaths respective to total number of confirmed cases = `r (deathTotal)/confirmedTotal * 100`%
+        
+        Percentage of deaths respective to the population of Lithuania = `r (deathTotal)/population * 100`%
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+
+lt_confirm_plot <- lt_corona_data %>% ggplot(aes(x = date, y = confirmed)) +
+  geom_line(color = "brown1") + geom_hline(yintercept = 1144.188, linetype = "dashed") +
+  labs(x = "Time", y = "Confirmed cases", title = "Confirmed cases of Lithuania") +
+  scale_y_continuous(
+    breaks = seq(0, max(lt_corona_data$confirmed), by = 2000)
+  )
+
+lt_death_plot <- lt_corona_data %>% ggplot(aes(x = date, y = death)) + 
+  geom_line(color = "black") + geom_hline(yintercept = 8.418198, linetype = "dashed") +
+  labs(x = "Time", y = "Deaths", title = "Death due to CoronaVirus") 
+
+lt_recovery_plot <- lt_corona_data %>% ggplot(aes(x = date, y = recovery)) + 
+  geom_line(color = "green") + geom_hline(yintercept = 236.1916, linetype = "dashed") +
+  labs(x = "Time", y = "Recovery", title = "Recoveries from CoronaVirus") +
+  scale_y_continuous(breaks = seq(0,max(lt_corona_data$recovery), by = 750))
+
+lt_active_plot <- lt_corona_data %>% ggplot(aes(x = date, y = active)) + geom_line(color = "darkorange") + geom_hline(yintercept = 976.7612, linetype = "dashed") +
+  labs(x = "Time", y = "Active cases", title = "Active cases") +
+  scale_y_continuous(breaks = seq(0,max(lt_corona_data$active), by = 2500))
+
+lt_confirm_plotly <- ggplotly(lt_confirm_plot)
+
+lt_death_plotly <- ggplotly(lt_death_plot)
+
+lt_recovery_plotly <- ggplotly(lt_recovery_plot)
+
+lt_active_plotly <- ggplotly(lt_active_plot)
+
+```
+#### 2.2.1 Visualization of Confirmed, Active, Recovery and Death cases
+
+
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+lt_confirm_plotly
+```
+This plot represent confirmed corona virus cases between 2020 January 22 to 2023 March 09. 
+
+      Confirmed Cases = No. of People Currently Infected + No. of People Cured + No. of People Died From Coronavirus
+      
+There are increasing and decreasing patterns of confirmed cases during the time period. We can observe a rapid increasing of a confirmed cases in first four months of the year 2022. This may result because of remove the restrictions impose for Corona virus by the government.
+
+
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+subplot(
+  lt_active_plotly,
+  lt_recovery_plotly,
+  lt_death_plotly,
+  nrows = 3,  
+  shareX = TRUE,
+  titleX = TRUE,
+  titleY = TRUE
+) %>%
+  layout(
+    title = "Plots of Active, Recovery and Death cases",  
+    title_x = 0.5, 
+    title_y = 0.95
+  )
+
+maxDeath <- lt_corona_data %>% filter(death == max(death))
+maxActiveCases <- lt_corona_data %>% filter(active == max(active))
+```
+
+Above figure display active, recovery and death cases occurred due to the Corona virus. There are several increases and decreases patterns in three plots.
+
+    Active Cases = No. of People Currently Infected
+
+We can observe maximum increase of death during the end of year 2020 and starting of the year 2021 which is above 40 everyday. Maximum number of deaths recorded in a single is 62 cases on 2020 December 26. But the active cases are below 3500 this time period. Which is not a good thing. During these vaccination is program had just begun. 
+
+We can observe maximum increase during the begining of 2022 in active cases plot.Peek occurred on 2022 February 03 with 15412. Even we observe a such increase in number confirmed cases number of deaths are always lesser than 40. At the begining of 2022 Lithuanian government has gave 2 doses of vaccination to many citizens. 
+
+We can observe the increasing pattern of active, recovery and death cases during the winter of 2020 and 2021.
+
+Starting from the month August in year 2021. There is no record about recovery cases. All the data are zero.
+
+
+
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+cumulativeActiveCases <- lt_corona_data %>% ggplot(aes(x = date, y = active_total)) + geom_line(color = "blue") +
+  labs(x = "Time", y = "Cumulative Active Cases", title = "Distribution of Cumulative Active cases") +
+  scale_y_continuous(breaks = seq(0,max(lt_corona_data$active_total), by = 50000))
+
+ggplotly(cumulativeActiveCases)
+```
+Lithuanian government announced a national lockdown on 4 November 2020. The lockdown was set to last until 29 November, but was later lengthened until 1 July 2021. During this time period we can observe relatively flat line in the plot. As well as during the first four months of year 2022 we can exponential spreading of Corona virus. When we come to the July 2022 there is slow growth in active cases. During this time most of the citizens have taken the vaccine. 
+
+
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+cumulativeDeath <- lt_corona_data %>% ggplot(aes(x = date, y = death_total)) + geom_line(color = "chocolate") +
+  labs(x = "Time", y = "Cumulative Death", title = "Distribution of Cumulative Deaths") +
+  scale_y_continuous(breaks = seq(0,max(lt_corona_data$death_total), by = 1000))
+
+ggplotly(cumulativeDeath)
+```
+
+We can observe decreasing positive gradient in the plot. after April 2022 we can observe relative flat line. After removing the lockdown in 2021 July there is a increase in number of deaths.
+
+
+
+#### 2.2.2 Comparison with other countries
+
+For the analysis considered neighbouring countries are **Belarus**, **Latvia**, **Estonia** and  **Poland**. Among these countries Latvia and Moldova are have population approximately equal to Lithuania. But Belarus and Poland are not. Poland have more than **nine** times higher population than Lithuania. 
+
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+leaflet(data = neighboring_countries) %>%
+  addTiles() %>%
+  addMarkers(lng = ~long, lat = ~lat, ) %>%
+  setView(lng = 23.8813, lat = 55.1694, zoom = 4)
+```
+<p style="text-align: center;">Location of neighbouring countries of Lithuania</p>
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+max_confirm <- max(neighboring_countries$confirmed, na.rm = TRUE)
+
+neighbors_cofirm_plot <- neighboring_countries %>% ggplot(aes(x = date, y = confirmed, col = country)) + geom_line() + geom_hline(yintercept = log10(1144.188) , linetype = "dashed") + labs(x = "Time", y = "Confirmed Cases in Log Scale", title = " Confirmed Cases of Neighbouring Countries") +
+  scale_y_log10(
+    breaks = scales::log_breaks(n = 5)
+  ) +  theme_minimal()
+
+ggplotly(neighbors_cofirm_plot)
+```
+
+Plot shows comparing with neighbouring countries Lithuania have higher number of confirmed cases.
+Estonia, Latvia and Lithuania are having same kind of pattern in confirmed cases 
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+
+max_active_total <- max(neighboring_countries$active_total, na.rm = TRUE)
+
+cumulativeActiveCasesOfNeighbors <- neighboring_countries %>% 
+  ggplot(aes(x = date, y = active_total, col = country)) +
+  geom_line() +
+  labs(x = "Time", y = "Cumulative Active Cases", title = "Distribution of Cumulative Active Cases of Neighboring Countries") +
+  scale_y_continuous(
+    breaks = seq(0, max_active_total, by = 500000)  
+  ) + theme_minimal()
+
+ggplotly(cumulativeActiveCasesOfNeighbors)
+```
+
+Poland has the highest number of active cases among these countries. Lithuania is got the third place. Belarus is having maintaining the minimum number during the time period. We can observe same pattern between Estonia, Latvia and Lithuania.
+
+```{r, message = FALSE, echo=FALSE, warning=FALSE}
+max_death_total <- max(neighboring_countries$death_total, na.rm = TRUE)
+
+cumulativeDeathsOfNeighbors <- neighboring_countries %>% 
+  ggplot(aes(x = date, y = death_total, col = country)) +
+  geom_line() +
+  labs(x = "Time", y = "Cumulative Death Cases", title = "Distribution of Cumulative Death Cases of Neighboring Countries") +
+  scale_y_continuous(
+    breaks = seq(0, max_death_total, by = 75000)  
+  ) + theme_minimal()
+
+ggplotly(cumulativeDeathsOfNeighbors)
+```
+
+Poland has the highest number of deaths and Belarus got minimum number of deaths comapring with comparing with the others. Belarus got the third place. We can observe same pattern between Estonia, Latvia and Lithuania.
+
+
+##### 2.2.2.1 Baltic countries comparison
+
+
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+boltic_confirm <- boltic_countries %>% ggplot(aes(x = date, y = confirmed, color = country)) +
+  geom_line() + 
+  geom_hline(yintercept = 1144.188, linetype = "dashed") +
+  labs(x = "Date", y = "Confirmed Cases in Baltic Region") +
+  theme_minimal() +
+  theme(legend.position = "none")
+  
+boltic_death <- boltic_countries %>% ggplot(aes(x = date, y = death, color = country)) +
+    geom_line() + geom_hline(yintercept = 8.418198, linetype = "dashed") +
+  labs(x = "Date", y = "Death in Baltic Region") +
+  theme_minimal()
+  
+
+boltic_confirm_plotly <- ggplotly(boltic_confirm)
+boltic_death_plotly <- ggplotly(boltic_death)
+  
+ subplot(
+  boltic_confirm_plotly,
+  boltic_death_plotly,
+  nrows = 2,  
+  shareX = TRUE,
+  titleX = TRUE,
+  titleY = TRUE
+) %>%
+  layout(
+    title = "Plots Confirm and Death cases in Baltic Region",  
+    title_x = 0.5, 
+    title_y = 0.95
+  )
+
+```
+
+
+Estonia, Latvia and Lithuania belongs to Baltic region. Baltic countries are economically, culturally and geographically similar. Three Baltic countries are classified as high-income economies by the World Bank and maintain a very high Human Development Index. The climate is cool and damp, with greater rainfall in the interior uplands than along the coast.
+
+We can observe number confirm cases and deaths are having similar pattern.
+
+
+# 3. Conclusion
+
+* Approximately 50% Lithuanian population had Corona virus.
+* 0.35% of Lithuanian people died because of the virus.
+* 0.73% of Lithuanian people who got virus died.
+* Majority of deaths occured in 2020 winter comparing with 2021 winter.
+* Most of the people got both doses in vaccine in 2022 and we can observe less number of death after that.
+* Even virus spread around the country, people survive from the because of the vaccine in 2022.
+* Lithuania Estonia and Latvia are having same pattern for confirmed, cumulative death cases and cumulative active cases.
+* Belarus had minimum number of confirmed cases and death cases comparing with Lithuania's neighbours.
+
+# 4. Discussion
+
+This analysis done about Corona virus spread in Lithuania between 2020 January 22 to 2023 March 09. The analysis is done using confirmed , death and recovery cases . The active cases are calculated using the data. After filtering the dataset there were 19 rows with negative values for confirmed , death and recovery cases which is not logical. I replace them by zeros. There was an outlier which was imputed by replacing the value by mean value of previous value and the after value. All the data of the recovery column are zero from 2021 August. Because of that I didn't use it for futher analysis. Since provinces are not given I didn't consider geographical factors. I have use lockdown details and vaccine details to draw my conclusions.
+
+# 5. References
+
+[1] "Lithuania" - https://en.wikipedia.org/wiki/Lithuania
+
+[2] "Demographics of Lithuania" - https://en.wikipedia.org/wiki/Demographics_of_Lithuania
+
+[3] "COVID-19 pandemic in Lithuania" - https://en.wikipedia.org/wiki/COVID-19_pandemic_in_Lithuania
+
+[4] "KORONA STOP - Relevant information about COVID-19 in Lithuania" - https://koronastop.lrv.lt/en/
+
+[5]  "WHO COVID-19 Case definition" - https://www.who.int/publications/i/item/WHO-2019-nCoV-Surveillance_Case_Definition-2022.1
